@@ -1,0 +1,15 @@
+{
+  "name": "My Awesome App",
+  "description": "تطبيق رائع مفتوح المصدر",
+  "long_description": "# مرحباً\n\nهذا تطبيق رائع يحتوي على:\n\n- ميزة 1\n- ميزة 2\n- ميزة 3\n\n## التثبيت\n\nحمّل الملف من الأسفل وثبّته.",
+  "category": "tools",
+  "icon": "https://raw.githubusercontent.com/owner/repo/main/icon.png",
+  "homepage": "https://example.com",
+  "developer": "John Developer",
+  "platforms": ["windows", "linux", "macos"],
+  "screenshots": [
+    "https://raw.githubusercontent.com/owner/repo/main/screenshots/1.png",
+    "https://raw.githubusercontent.com/owner/repo/main/screenshots/2.png",
+    "https://raw.githubusercontent.com/owner/repo/main/screenshots/3.png"
+  ]
+}
