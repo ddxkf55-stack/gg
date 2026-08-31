@@ -1,0 +1,21 @@
+thender/
+├── package.json
+├── server.js
+├── .env
+├── generate_icons.py          ← سكربت Python الجديد
+├── public/
+│   ├── css/
+│   │   └── style.css          ← محسّن بالكامل
+│   ├── js/
+│   │   └── main.js            ← محسّن
+│   ── icons/                 ← يولّدها السكربت تلقائياً
+│       ├── search.svg
+│       ├── globe.svg
+│       ├── shield.svg
+│       ├── lightning.svg
+│       ├── arrow.svg
+│       ├── sad-face.svg
+│       └── logo.svg
+└── views/
+    ├── index.ejs              ← محسّن
+    ── results.ejs            ← محسّن
