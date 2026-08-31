@@ -1,238 +1,203 @@
-/*!
- * accepts
- * Copyright(c) 2014 Jonathan Ong
- * Copyright(c) 2015 Douglas Christopher Wilson
- * MIT Licensed
- */
-
-'use strict'
-
-/**
- * Module dependencies.
- * @private
- */
-
-var Negotiator = require('negotiator')
-var mime = require('mime-types')
-
-/**
- * Module exports.
- * @public
- */
-
-module.exports = Accepts
-
-/**
- * Create a new Accepts object for the given req.
- *
- * @param {object} req
- * @public
- */
-
-function Accepts (req) {
-  if (!(this instanceof Accepts)) {
-    return new Accepts(req)
-  }
-
-  this.headers = req.headers
-  this.negotiator = new Negotiator(req)
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+const events_1 = require("events");
+const debug_1 = __importDefault(require("debug"));
+const promisify_1 = __importDefault(require("./promisify"));
+const debug = debug_1.default('agent-base');
+function isAgent(v) {
+    return Boolean(v) && typeof v.addRequest === 'function';
 }
-
-/**
- * Check if the given `type(s)` is acceptable, returning
- * the best match when true, otherwise `undefined`, in which
- * case you should respond with 406 "Not Acceptable".
- *
- * The `type` value may be a single mime type string
- * such as "application/json", the extension name
- * such as "json" or an array `["json", "html", "text/plain"]`. When a list
- * or array is given the _best_ match, if any is returned.
- *
- * Examples:
- *
- *     // Accept: text/html
- *     this.types('html');
- *     // => "html"
- *
- *     // Accept: text/*, application/json
- *     this.types('html');
- *     // => "html"
- *     this.types('text/html');
- *     // => "text/html"
- *     this.types('json', 'text');
- *     // => "json"
- *     this.types('application/json');
- *     // => "application/json"
- *
- *     // Accept: text/*, application/json
- *     this.types('image/png');
- *     this.types('png');
- *     // => undefined
- *
- *     // Accept: text/*;q=.5, application/json
- *     this.types(['html', 'json']);
- *     this.types('html', 'json');
- *     // => "json"
- *
- * @param {String|Array} types...
- * @return {String|Array|Boolean}
- * @public
- */
-
-Accepts.prototype.type =
-Accepts.prototype.types = function (types_) {
-  var types = types_
-
-  // support flattened arguments
-  if (types && !Array.isArray(types)) {
-    types = new Array(arguments.length)
-    for (var i = 0; i < types.length; i++) {
-      types[i] = arguments[i]
+function isSecureEndpoint() {
+    const { stack } = new Error();
+    if (typeof stack !== 'string')
+        return false;
+    return stack.split('\n').some(l => l.indexOf('(https.js:') !== -1 || l.indexOf('node:https:') !== -1);
+}
+function createAgent(callback, opts) {
+    return new createAgent.Agent(callback, opts);
+}
+(function (createAgent) {
+    /**
+     * Base `http.Agent` implementation.
+     * No pooling/keep-alive is implemented by default.
+     *
+     * @param {Function} callback
+     * @api public
+     */
+    class Agent extends events_1.EventEmitter {
+        constructor(callback, _opts) {
+            super();
+            let opts = _opts;
+            if (typeof callback === 'function') {
+                this.callback = callback;
+            }
+            else if (callback) {
+                opts = callback;
+            }
+            // Timeout for the socket to be returned from the callback
+            this.timeout = null;
+            if (opts && typeof opts.timeout === 'number') {
+                this.timeout = opts.timeout;
+            }
+            // These aren't actually used by `agent-base`, but are required
+            // for the TypeScript definition files in `@types/node` :/
+            this.maxFreeSockets = 1;
+            this.maxSockets = 1;
+            this.maxTotalSockets = Infinity;
+            this.sockets = {};
+            this.freeSockets = {};
+            this.requests = {};
+            this.options = {};
+        }
+        get defaultPort() {
+            if (typeof this.explicitDefaultPort === 'number') {
+                return this.explicitDefaultPort;
+            }
+            return isSecureEndpoint() ? 443 : 80;
+        }
+        set defaultPort(v) {
+            this.explicitDefaultPort = v;
+        }
+        get protocol() {
+            if (typeof this.explicitProtocol === 'string') {
+                return this.explicitProtocol;
+            }
+            return isSecureEndpoint() ? 'https:' : 'http:';
+        }
+        set protocol(v) {
+            this.explicitProtocol = v;
+        }
+        callback(req, opts, fn) {
+            throw new Error('"agent-base" has no default implementation, you must subclass and override `callback()`');
+        }
+        /**
+         * Called by node-core's "_http_client.js" module when creating
+         * a new HTTP request with this Agent instance.
+         *
+         * @api public
+         */
+        addRequest(req, _opts) {
+            const opts = Object.assign({}, _opts);
+            if (typeof opts.secureEndpoint !== 'boolean') {
+                opts.secureEndpoint = isSecureEndpoint();
+            }
+            if (opts.host == null) {
+                opts.host = 'localhost';
+            }
+            if (opts.port == null) {
+                opts.port = opts.secureEndpoint ? 443 : 80;
+            }
+            if (opts.protocol == null) {
+                opts.protocol = opts.secureEndpoint ? 'https:' : 'http:';
+            }
+            if (opts.host && opts.path) {
+                // If both a `host` and `path` are specified then it's most
+                // likely the result of a `url.parse()` call... we need to
+                // remove the `path` portion so that `net.connect()` doesn't
+                // attempt to open that as a unix socket file.
+                delete opts.path;
+            }
+            delete opts.agent;
+            delete opts.hostname;
+            delete opts._defaultAgent;
+            delete opts.defaultPort;
+            delete opts.createConnection;
+            // Hint to use "Connection: close"
+            // XXX: non-documented `http` module API :(
+            req._last = true;
+            req.shouldKeepAlive = false;
+            let timedOut = false;
+            let timeoutId = null;
+            const timeoutMs = opts.timeout || this.timeout;
+            const onerror = (err) => {
+                if (req._hadError)
+                    return;
+                req.emit('error', err);
+                // For Safety. Some additional errors might fire later on
+                // and we need to make sure we don't double-fire the error event.
+                req._hadError = true;
+            };
+            const ontimeout = () => {
+                timeoutId = null;
+                timedOut = true;
+                const err = new Error(`A "socket" was not created for HTTP request before ${timeoutMs}ms`);
+                err.code = 'ETIMEOUT';
+                onerror(err);
+            };
+            const callbackError = (err) => {
+                if (timedOut)
+                    return;
+                if (timeoutId !== null) {
+                    clearTimeout(timeoutId);
+                    timeoutId = null;
+                }
+                onerror(err);
+            };
+            const onsocket = (socket) => {
+                if (timedOut)
+                    return;
+                if (timeoutId != null) {
+                    clearTimeout(timeoutId);
+                    timeoutId = null;
+                }
+                if (isAgent(socket)) {
+                    // `socket` is actually an `http.Agent` instance, so
+                    // relinquish responsibility for this `req` to the Agent
+                    // from here on
+                    debug('Callback returned another Agent instance %o', socket.constructor.name);
+                    socket.addRequest(req, opts);
+                    return;
+                }
+                if (socket) {
+                    socket.once('free', () => {
+                        this.freeSocket(socket, opts);
+                    });
+                    req.onSocket(socket);
+                    return;
+                }
+                const err = new Error(`no Duplex stream was returned to agent-base for \`${req.method} ${req.path}\``);
+                onerror(err);
+            };
+            if (typeof this.callback !== 'function') {
+                onerror(new Error('`callback` is not defined'));
+                return;
+            }
+            if (!this.promisifiedCallback) {
+                if (this.callback.length >= 3) {
+                    debug('Converting legacy callback function to promise');
+                    this.promisifiedCallback = promisify_1.default(this.callback);
+                }
+                else {
+                    this.promisifiedCallback = this.callback;
+                }
+            }
+            if (typeof timeoutMs === 'number' && timeoutMs > 0) {
+                timeoutId = setTimeout(ontimeout, timeoutMs);
+            }
+            if ('port' in opts && typeof opts.port !== 'number') {
+                opts.port = Number(opts.port);
+            }
+            try {
+                debug('Resolving socket for %o request: %o', opts.protocol, `${req.method} ${req.path}`);
+                Promise.resolve(this.promisifiedCallback(req, opts)).then(onsocket, callbackError);
+            }
+            catch (err) {
+                Promise.reject(err).catch(callbackError);
+            }
+        }
+        freeSocket(socket, opts) {
+            debug('Freeing socket %o %o', socket.constructor.name, opts);
+            socket.destroy();
+        }
+        destroy() {
+            debug('Destroying agent %o', this.constructor.name);
+        }
     }
-  }
-
-  // no types, return all requested types
-  if (!types || types.length === 0) {
-    return this.negotiator.mediaTypes()
-  }
-
-  // no accept header, return first given type
-  if (!this.headers.accept) {
-    return types[0]
-  }
-
-  var mimes = types.map(extToMime)
-  var accepts = this.negotiator.mediaTypes(mimes.filter(validMime))
-  var first = accepts[0]
-
-  return first
-    ? types[mimes.indexOf(first)]
-    : false
-}
-
-/**
- * Return accepted encodings or best fit based on `encodings`.
- *
- * Given `Accept-Encoding: gzip, deflate`
- * an array sorted by quality is returned:
- *
- *     ['gzip', 'deflate']
- *
- * @param {String|Array} encodings...
- * @return {String|Array}
- * @public
- */
-
-Accepts.prototype.encoding =
-Accepts.prototype.encodings = function (encodings_) {
-  var encodings = encodings_
-
-  // support flattened arguments
-  if (encodings && !Array.isArray(encodings)) {
-    encodings = new Array(arguments.length)
-    for (var i = 0; i < encodings.length; i++) {
-      encodings[i] = arguments[i]
-    }
-  }
-
-  // no encodings, return all requested encodings
-  if (!encodings || encodings.length === 0) {
-    return this.negotiator.encodings()
-  }
-
-  return this.negotiator.encodings(encodings)[0] || false
-}
-
-/**
- * Return accepted charsets or best fit based on `charsets`.
- *
- * Given `Accept-Charset: utf-8, iso-8859-1;q=0.2, utf-7;q=0.5`
- * an array sorted by quality is returned:
- *
- *     ['utf-8', 'utf-7', 'iso-8859-1']
- *
- * @param {String|Array} charsets...
- * @return {String|Array}
- * @public
- */
-
-Accepts.prototype.charset =
-Accepts.prototype.charsets = function (charsets_) {
-  var charsets = charsets_
-
-  // support flattened arguments
-  if (charsets && !Array.isArray(charsets)) {
-    charsets = new Array(arguments.length)
-    for (var i = 0; i < charsets.length; i++) {
-      charsets[i] = arguments[i]
-    }
-  }
-
-  // no charsets, return all requested charsets
-  if (!charsets || charsets.length === 0) {
-    return this.negotiator.charsets()
-  }
-
-  return this.negotiator.charsets(charsets)[0] || false
-}
-
-/**
- * Return accepted languages or best fit based on `langs`.
- *
- * Given `Accept-Language: en;q=0.8, es, pt`
- * an array sorted by quality is returned:
- *
- *     ['es', 'pt', 'en']
- *
- * @param {String|Array} langs...
- * @return {Array|String}
- * @public
- */
-
-Accepts.prototype.lang =
-Accepts.prototype.langs =
-Accepts.prototype.language =
-Accepts.prototype.languages = function (languages_) {
-  var languages = languages_
-
-  // support flattened arguments
-  if (languages && !Array.isArray(languages)) {
-    languages = new Array(arguments.length)
-    for (var i = 0; i < languages.length; i++) {
-      languages[i] = arguments[i]
-    }
-  }
-
-  // no languages, return all requested languages
-  if (!languages || languages.length === 0) {
-    return this.negotiator.languages()
-  }
-
-  return this.negotiator.languages(languages)[0] || false
-}
-
-/**
- * Convert extnames to mime.
- *
- * @param {String} type
- * @return {String}
- * @private
- */
-
-function extToMime (type) {
-  return type.indexOf('/') === -1
-    ? mime.lookup(type)
-    : type
-}
-
-/**
- * Check if mime is valid.
- *
- * @param {String} type
- * @return {String}
- * @private
- */
-
-function validMime (type) {
-  return typeof type === 'string'
-}
+    createAgent.Agent = Agent;
+    // So that `instanceof` works correctly
+    createAgent.prototype = createAgent.Agent.prototype;
+})(createAgent || (createAgent = {}));
+module.exports = createAgent;
+//# sourceMappingURL=index.js.map
